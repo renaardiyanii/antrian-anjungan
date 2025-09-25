@@ -42,73 +42,46 @@ const Body = () => {
     const handleKirim = async () => {
         // ketika di submit, mengecek ke database, apakah tersedia? jika tersedia resep maka cetak antrian dengan
         // format F-0{nourut}
-        const formData = new FormData();
-        formData.append('kodebooking', type);
-        const timestamp: number = Date.now();
-        formData.append('waktu', timestamp);
         const response = await fetch('http://192.168.1.139:8080/antrol/api/checkinantrianfarmasi/' + type, {
             method: 'GET'
         });
-        // console.log(response);
+
         const v = await response.json();
-        // console.log(v);
+        console.log('Response data:', v);
+
         if(v == null){
             Swal.fire({
-                            title: 'Error!',
-                            text: "Pastikan Masukan Nomor Dengan Benar",
-                            icon: 'error',
-                            confirmButtonText: 'Ok'
-                          })
-                return;
-        }
-        const response2 = await fetch('http://localhost:8000/adminantrian/v2/antrianfarmasi/' + type, {
-            method: 'GET'
-        });
-        // console.log(response);
-        // const v2 = await response2.json();
-        const vs2 = await response2.json();
-        if (vs2.metadata.code == 200) {
-            let nomorAntreanFormatted = "F-" + String(vs2.response.noantrian).padStart(3, '0');
-            
-            let queryparam = btoa(JSON.stringify({
-                'nomorantrean':nomorAntreanFormatted,
-                'namapoli': '',
-                "namadokter": '',
-                "sisakuotajkn": ''
-            }));
-            router.push('/antrian/cetak?q=' + queryparam);
+                title: 'Error!',
+                text: "Pastikan Masukan Nomor Dengan Benar",
+                icon: 'error',
+                confirmButtonText: 'Ok'
+            })
+            return;
         }
 
+        // Generate nomor antrian farmasi berdasarkan data yang didapat
+        let nomorAntreanFormatted = "F-" + String(v.noantrian).padStart(3, '0');
 
-        return;
+        // Ambil nama dokter dari data atau kosongkan jika tidak ada
+        let namaDokter = '';
+        if (v.nama_dokter) {
+            namaDokter = v.nama_dokter;
+        }
 
-        // const formData = new FormData();
-        //     formData.append('kodebooking', type);
-        //     const timestamp: number = Date.now();
-        //     formData.append('waktu', timestamp);
-        //     const response = await fetch('http://192.168.1.202:8080/antrol/api/checkinantrian', {
-        //         method: 'POST',
-        //         body: formData,  // Kirim body dalam bentuk form-data
-        //     });
-        //     // console.log(response);
-        //     const v = await response.json();
-        //     console.log(v);
-        //     if (v.metadata.code == 200) {
-        //         Swal.fire({
-        //             title: 'Berhasil!',
-        //             text: v.metadata.message,
-        //             icon: 'success',
-        //             confirmButtonText: 'Ok'
-        //           })
-        //     } else {
-        //         Swal.fire({
-        //             title: 'Error!',
-        //             text: v.metadata.message,
-        //             icon: 'error',
-        //             confirmButtonText: 'Ok'
-        //           })
-        //         throw new Error(`Peringatan : ${v.metadata.message}`);
-        //     }
+        // Ambil nama pasien dari data atau kosongkan jika tidak ada
+        let namaPasien = '';
+        if (v.nama) {
+            namaPasien = v.nama;
+        }
+
+        let queryparam = btoa(JSON.stringify({
+            'nomorantrean': nomorAntreanFormatted,
+            'namadokter': namaDokter,
+            'namapasien': namaPasien
+        }));
+
+        // Redirect ke halaman cetak farmasi yang terpisah
+        router.push('/antrian/cetakfarmasi?q=' + queryparam);
     }
 
 
