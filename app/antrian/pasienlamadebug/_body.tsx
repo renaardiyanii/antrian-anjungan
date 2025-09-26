@@ -552,15 +552,17 @@ const Body = () => {
                     </div>
 
                     {/* --- PENAMBAHAN FIELD BARU: Untuk Nomor Rujukan yang Dipilih --- */}
-                    <div className='my-4'>
-                        <label htmlFor="nomorrujukan" className='text-secondary'>Nomor Rujukan (Terisi Otomatis)</label>
-                        <input style={{
-                            height: '3rem',
-                            fontSize: '1rem',
-                            marginTop: '0.5rem',
-                            backgroundColor: '#e9ecef', // Warna abu-abu untuk field readonly
-                        }} value={nomorRujukan} id="nomorrujukan" type="text" readOnly className="form-control" />
-                    </div>
+                    {kategoriPasien === 'BPJS' && (
+                        <div className='my-4'>
+                            <label htmlFor="nomorrujukan" className='text-secondary'>Nomor Rujukan (Terisi Otomatis)</label>
+                            <input style={{
+                                height: '3rem',
+                                fontSize: '1rem',
+                                marginTop: '0.5rem',
+                                backgroundColor: '#e9ecef', // Warna abu-abu untuk field readonly
+                            }} value={nomorRujukan} id="nomorrujukan" type="text" readOnly className="form-control" />
+                        </div>
+                    )}
 
                     <div className='my-4'>
                         <label htmlFor="poliklinik" className='text-secondary'>Pilih Poliklinik</label><br></br>
