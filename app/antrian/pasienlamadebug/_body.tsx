@@ -19,6 +19,8 @@ const Body = () => {
     const [isDisablePoli, setIsDisablePoli] = useState(false);
     const [nomorRujukan, setNomorRujukan] = useState('');
     const [selectedRujukan, setSelectedRujukan] = useState(null);
+    const [activeTab, setActiveTab] = useState('faskes'); // 'faskes' atau 'rs'
+    const [selectedRujukanType, setSelectedRujukanType] = useState('faskes'); // Menyimpan tipe rujukan yang dipilih
 
     const handleSelectDokter = (event: any) => {
         setSelectedDokter(event.target.value);
@@ -74,6 +76,38 @@ const Body = () => {
             });
     };
 
+    // --- FUNGSI BARU: Untuk fetch rujukan RS dengan parameter rs=1 ---
+    const fetchRujukanRS = async (nomorkartu: string) => {
+        try {
+            const response = await fetch(`${process.env.NEXT_PUBLIC_SIMRS}/antrol/api/onsitedebug?getrujukan=1&val=${nomorkartu}&rs=1`);
+            const data = await response.json();
+            return data;
+        } catch (error) {
+            console.error('Error fetching rujukan RS:', error);
+            return null;
+        }
+    };
+
+    // --- FUNGSI BARU: Untuk cek jumlah SEP berdasarkan rujukan ---
+    const cekJumlahSEP = async (rujukan: any, tabType = 'faskes') => {
+        try {
+            // Parameter tipe rujukan: 1 = FKTP, 2 = RS
+            const tipeRujukan = tabType === 'rs' ? '2' : '1';
+            const url = `${process.env.NEXT_PUBLIC_SIMRS}/antrol/api/onsitedebug?cekjumlahsep=1&tipe=${tipeRujukan}&norujukan=${rujukan.noKunjungan}`;
+
+            const response = await fetch(url);
+            const data = await response.json();
+
+            if (data.metaData && data.metaData.code === 200) {
+                return data.response.jumlahSEP || '0';
+            }
+            return '0';
+        } catch (error) {
+            console.error('Error fetching jumlah SEP:', error);
+            return '0';
+        }
+    };
+
     // --- FUNGSI BARU: Untuk mengecek rujukan dan menampilkan modal ---
     const handleCekRujukan = async () => {
         if (!nomorNik) {
@@ -90,15 +124,26 @@ const Body = () => {
         });
 
         try {
-            const response = await fetch(`${process.env.NEXT_PUBLIC_SIMRS}/antrol/api/onsitedebug?getrujukan=1&val=${nomorNik}`);
-            const data = await response.json();
+            // Fetch data dari kedua sumber secara bersamaan
+            const [responseFaskes, responseRS] = await Promise.all([
+                fetch(`${process.env.NEXT_PUBLIC_SIMRS}/antrol/api/onsitedebug?getrujukan=1&val=${nomorNik}`),
+                fetchRujukanRS(nomorNik)
+            ]);
 
-            if (data.metaData.code === 200 && data.response.rujukan && data.response.rujukan.length > 0) {
+            const dataFaskes = await responseFaskes.json();
+            const dataRS = responseRS;
+
+            // Cek apakah ada data rujukan dari salah satu sumber
+            const hasFaskesData = dataFaskes.metaData.code === 200 && dataFaskes.response.rujukan && dataFaskes.response.rujukan.length > 0;
+            const hasRSData = dataRS && dataRS.metaData.code === 200 && dataRS.response.rujukan && dataRS.response.rujukan.length > 0;
+
+            if (hasFaskesData || hasRSData) {
                 Swal.close();
-                const rujukanList = data.response.rujukan;
+                const rujukanFaskes = hasFaskesData ? dataFaskes.response.rujukan : [];
+                const rujukanRS = hasRSData ? dataRS.response.rujukan : [];
 
-                // Membuat HTML untuk tabel di dalam modal
-                const tableHtml = `
+                // Fungsi untuk membuat HTML tabel
+                const createTableHtml = (rujukanList, tabType) => `
                     <div class="table-responsive" style="max-height: 400px; overflow-y: auto;">
                         <table class="table table-hover table-bordered text-start">
                             <thead class="table-light" style="position: sticky; top: 0;">
@@ -120,7 +165,7 @@ const Body = () => {
                                         <td>${rujukan.poliRujukan.nama}</td>
                                         <td>${rujukan.diagnosa.nama}</td>
                                         <td>
-                                            <button class="btn btn-primary btn-sm btn-pilih-rujukan" data-nokunjungan="${rujukan.noKunjungan}" data-kodepoli="${rujukan.poliRujukan.kode}">Pilih</button>
+                                            <button class="btn btn-primary btn-sm btn-pilih-rujukan" data-nokunjungan="${rujukan.noKunjungan}" data-kodepoli="${rujukan.poliRujukan.kode}" data-tabtype="${tabType}">Pilih</button>
                                         </td>
                                     </tr>
                                 `).join('')}
@@ -129,23 +174,75 @@ const Body = () => {
                     </div>
                 `;
 
+                // Membuat HTML untuk modal dengan tab
+                const modalHtml = `
+                    <div>
+                        <!-- Tab Navigation -->
+                        <ul class="nav nav-tabs" id="rujukanTabs" role="tablist">
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link ${hasFaskesData ? 'active' : ''}" id="faskes-tab" data-bs-toggle="tab" data-bs-target="#faskes" type="button" role="tab">
+                                    Rujukan Faskes ${hasFaskesData ? `(${rujukanFaskes.length})` : '(0)'}
+                                </button>
+                            </li>
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link ${!hasFaskesData && hasRSData ? 'active' : ''}" id="rs-tab" data-bs-toggle="tab" data-bs-target="#rs" type="button" role="tab">
+                                    Rujukan RS ${hasRSData ? `(${rujukanRS.length})` : '(0)'}
+                                </button>
+                            </li>
+                        </ul>
+
+                        <!-- Tab Content -->
+                        <div class="tab-content" id="rujukanTabContent" style="margin-top: 15px;">
+                            <!-- Tab Faskes -->
+                            <div class="tab-pane fade ${hasFaskesData ? 'show active' : ''}" id="faskes" role="tabpanel">
+                                ${hasFaskesData ? createTableHtml(rujukanFaskes, 'faskes') : '<p class="text-center text-muted py-3">Tidak ada data rujukan faskes</p>'}
+                            </div>
+
+                            <!-- Tab RS -->
+                            <div class="tab-pane fade ${!hasFaskesData && hasRSData ? 'show active' : ''}" id="rs" role="tabpanel">
+                                ${hasRSData ? createTableHtml(rujukanRS, 'rs') : '<p class="text-center text-muted py-3">Tidak ada data rujukan RS</p>'}
+                            </div>
+                        </div>
+                    </div>
+                `;
+
                 Swal.fire({
                     title: '<strong>Data Rujukan Ditemukan</strong>',
-                    html: tableHtml,
+                    html: modalHtml,
                     width: '80%',
                     showConfirmButton: false,
                     showCloseButton: true,
                     didOpen: () => {
+                        // Event listener untuk tab switching
+                        document.querySelectorAll('[data-bs-toggle="tab"]').forEach(tab => {
+                            tab.addEventListener('click', (e) => {
+                                e.preventDefault();
+                                const targetTab = e.target.getAttribute('data-bs-target');
+
+                                // Remove active class from all tabs and panes
+                                document.querySelectorAll('.nav-link').forEach(link => link.classList.remove('active'));
+                                document.querySelectorAll('.tab-pane').forEach(pane => {
+                                    pane.classList.remove('show', 'active');
+                                });
+
+                                // Add active class to clicked tab and corresponding pane
+                                e.target.classList.add('active');
+                                document.querySelector(targetTab).classList.add('show', 'active');
+                            });
+                        });
+
                         // Menambahkan event listener ke setiap tombol "Pilih"
                         document.querySelectorAll('.btn-pilih-rujukan').forEach(button => {
                             button.addEventListener('click', (e) => {
                                 const noKunjungan = e.currentTarget.getAttribute('data-nokunjungan');
                                 const kodePoli = e.currentTarget.getAttribute('data-kodepoli');
-                                // handlePilihRujukan(noKunjungan, kodePoli);
-                                // Cari objek rujukan lengkap dari rujukanList
+                                const tabType = e.currentTarget.getAttribute('data-tabtype');
+
+                                // Cari objek rujukan lengkap dari list yang sesuai dengan tab
+                                const rujukanList = tabType === 'faskes' ? rujukanFaskes : rujukanRS;
                                 const rujukanTerpilih = rujukanList.find(r => r.noKunjungan === noKunjungan);
                                 if (rujukanTerpilih) {
-                                    handlePilihRujukan(rujukanTerpilih); // Kirim seluruh objek
+                                    handlePilihRujukan(rujukanTerpilih, tabType); // Kirim seluruh objek dan tipe tab
                                 }
                             });
                         });
@@ -170,17 +267,88 @@ const Body = () => {
     //     Swal.close(); // Tutup modal
     //     Swal.fire('Sukses', `Rujukan ${noKunjungan} telah dipilih.`, 'success');
     // };
-    const handlePilihRujukan = (rujukan:any) => {
+    const handlePilihRujukan = async (rujukan:any, tabType = 'faskes') => {
         // Sekarang Anda memiliki akses ke semua data rujukan
-        console.log('Data rujukan yang dipilih:', rujukan); 
-    
-        setSelectedRujukan(rujukan); // <-- Simpan seluruh objek rujukan
-        setNomorRujukan(rujukan.noKunjungan); // Mengisi field nomor rujukan
-        setSelectedOption(rujukan.poliRujukan.kode);  // Auto-select poliklinik
-        handleSelectChangeAuto(rujukan.poliRujukan.kode); // Auto-fetch dokter untuk poli tersebut
-        setIsDisablePoli(true); // Nonaktifkan pilihan poli
-        Swal.close(); // Tutup modal
-        Swal.fire('Sukses', `Rujukan ${rujukan.noKunjungan} telah dipilih.`, 'success');
+        console.log('Data rujukan yang dipilih:', rujukan);
+        console.log('Tipe tab:', tabType);
+
+        // Tampilkan loading saat mengecek SEP
+        Swal.fire({
+            title: 'Mengecek data rujukan...',
+            didOpen: () => {
+                Swal.showLoading();
+            },
+            allowOutsideClick: false
+        });
+
+        try {
+            // Cek jumlah SEP untuk rujukan ini
+            const jumlahSEP = await cekJumlahSEP(rujukan, tabType);
+            console.log('Jumlah SEP:', jumlahSEP);
+
+            setSelectedRujukan(rujukan); // <-- Simpan seluruh objek rujukan
+            setSelectedRujukanType(tabType); // <-- Simpan tipe rujukan yang dipilih
+            setNomorRujukan(rujukan.noKunjungan); // Mengisi field nomor rujukan
+
+            if (jumlahSEP === '0') {
+                // SEP = 0, otomatis pilih poliklinik dan dokter
+                console.log('Rujukan poliRujukan:', rujukan.poliRujukan);
+                console.log('Poliklinik options:', poliklinikOptions);
+
+                // Cari poliklinik yang sesuai dari poliklinikOptions berdasarkan kode BPJS
+                const poliklinikSesuai = poliklinikOptions.find(poli =>
+                    poli.poli_bpjs === rujukan.poliRujukan.kode
+                );
+
+                if (poliklinikSesuai) {
+                    // Format value sesuai dengan dropdown: id_poli + '#' + poli_bpjs
+                    const selectedPoliValue = `${poliklinikSesuai.id_poli}#${poliklinikSesuai.poli_bpjs}`;
+                    console.log('Selected poli value:', selectedPoliValue);
+
+                    setSelectedOption(selectedPoliValue);  // Auto-select poliklinik dengan format yang benar
+
+                    // Fetch dokter untuk poli tersebut menggunakan poli_bpjs
+                    const response = await fetch(`${process.env.NEXT_PUBLIC_SIMRS}/antrol/api/onsite?cekdokter=1&val=${poliklinikSesuai.poli_bpjs}`);
+                    const data = await response.json();
+                    console.log('Response dokter:', data);
+
+                    if (data.metadata && data.metadata.code === 200 && data.response.length > 0) {
+                        setDokter(data.response);
+                        // Auto-select dokter pertama
+                        const dokterPertama = data.response[0];
+                        const dokterValue = `${dokterPertama.kodedokter}@${dokterPertama.jadwal}`;
+                        console.log('Auto-selected dokter:', dokterValue);
+                        setSelectedDokter(dokterValue);
+
+                        Swal.close();
+                        const tabLabel = tabType === 'rs' ? 'RS' : 'Faskes';
+                        Swal.fire('Sukses', `Rujukan ${tabLabel} ${rujukan.noKunjungan} telah dipilih dan dokter otomatis terpilih.`, 'success');
+                    } else {
+                        // Jika tidak ada dokter, tetap pilih poli tapi tidak auto-select dokter
+                        setDokter([]);
+                        Swal.close();
+                        const tabLabel = tabType === 'rs' ? 'RS' : 'Faskes';
+                        Swal.fire('Info', `Rujukan ${tabLabel} ${rujukan.noKunjungan} telah dipilih. Silakan pilih dokter.`, 'info');
+                    }
+                    setIsDisablePoli(true); // Nonaktifkan pilihan poli
+                } else {
+                    console.error('Poliklinik tidak ditemukan untuk kode:', rujukan.poliRujukan.kode);
+                    Swal.close();
+                    const tabLabel = tabType === 'rs' ? 'RS' : 'Faskes';
+                    Swal.fire('Warning', `Rujukan ${tabLabel} ${rujukan.noKunjungan} telah dipilih, tetapi poliklinik tidak ditemukan dalam daftar. Silakan pilih manual.`, 'warning');
+                }
+            } else {
+                // SEP > 0, hanya set rujukan tanpa auto-select
+                Swal.close();
+                const tabLabel = tabType === 'rs' ? 'RS' : 'Faskes';
+                Swal.fire('Info', `Rujukan ${tabLabel} ${rujukan.noKunjungan} telah dipilih (sudah ada ${jumlahSEP} SEP). Silakan pilih poliklinik dan dokter.`, 'info');
+            }
+
+        } catch (error) {
+            console.error('Error saat memproses rujukan:', error);
+            Swal.close();
+            Swal.fire('Error', 'Terjadi kesalahan saat memproses rujukan.', 'error');
+        }
     };
 
     // Ambil rujukan dan jumlah sep ( otomatiskan rujukan. )
@@ -268,6 +436,34 @@ const Body = () => {
                 throw new Error(`Peringatan : ${data.metaData.message}`);
             }
             console.log(data);
+        } catch (error) {
+            console.error('Error:', error);
+        }
+    }
+
+    // --- FUNGSI BARU: Untuk fetch required data rujukan RS dengan parameter rs=1 ---
+    const fetchRequiredDataRujukanRS = async (nomorKartu: string, kodePoli: string, rujukan: any) => {
+        const formData = new FormData();
+        formData.append('nomorkartu', nomorKartu); // Tambahkan data form
+        formData.append('kodepoli', kodePoli);
+        formData.append('rujukan', JSON.stringify(rujukan)); // Tambahkan nomor rujukan jika diperlukan
+
+        try {
+            const response = await fetch(`${process.env.NEXT_PUBLIC_SIMRS}/antrol/api/onsitedebug?ceknokarturujukan=1&rs=1`, {
+                method: 'POST',
+                body: formData,  // Kirim body dalam bentuk form-data
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+
+            const data = await response.json(); // Jika respons berupa JSON
+            if (data.metaData.code == 200) {
+                return data.response;
+            } else {
+                throw new Error(`Peringatan : ${data.metaData.message}`);
+            }
         } catch (error) {
             console.error('Error:', error);
         }
@@ -391,7 +587,16 @@ const Body = () => {
             return;
         }
         // const data = await fetchrequiredData(nomorNik, selectedOption);
-        const data = await fetchRequiredDataRujukan(nomorNik, selectedOption, selectedRujukan);
+        // Pilih fungsi yang sesuai berdasarkan tipe rujukan
+        let data;
+        if (selectedRujukanType === 'rs') {
+            // Untuk rujukan RS, gunakan fungsi dengan parameter rs=1
+            data = await fetchRequiredDataRujukanRS(nomorNik, selectedOption, selectedRujukan);
+        } else {
+            // Untuk rujukan Faskes, gunakan fungsi standar
+            data = await fetchRequiredDataRujukan(nomorNik, selectedOption, selectedRujukan);
+        }
+        console.log(data);
         // return;
         if (data) {
             const formData = new FormData();
