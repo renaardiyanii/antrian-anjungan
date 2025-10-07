@@ -21,6 +21,7 @@ const Body = () => {
     const [selectedRujukan, setSelectedRujukan] = useState(null);
     const [activeTab, setActiveTab] = useState('faskes'); // 'faskes' atau 'rs'
     const [selectedRujukanType, setSelectedRujukanType] = useState('faskes'); // Menyimpan tipe rujukan yang dipilih
+    const [suratKontrol, setSuratKontrol] = useState(''); // State untuk menyimpan nomor surat kontrol
 
     const handleSelectDokter = (event: any) => {
         setSelectedDokter(event.target.value);
@@ -88,6 +89,18 @@ const Body = () => {
         }
     };
 
+    // --- FUNGSI BARU: Untuk fetch rujukan Pasca Rawat Inap ---
+    const fetchRujukanPascaRawatInap = async (nomorkartu: string) => {
+        try {
+            const response = await fetch(`${process.env.NEXT_PUBLIC_SIMRS}/antrol/api/bpjs_sep/${nomorkartu}/1`);
+            const data = await response.json();
+            return data;
+        } catch (error) {
+            console.error('Error fetching rujukan Pasca Rawat Inap:', error);
+            return null;
+        }
+    };
+
     // --- FUNGSI BARU: Untuk cek jumlah SEP berdasarkan rujukan ---
     const cekJumlahSEP = async (rujukan: any, tabType = 'faskes') => {
         try {
@@ -124,10 +137,11 @@ const Body = () => {
         });
 
         try {
-            // Fetch data dari kedua sumber secara bersamaan
-            const [responseFaskes, responseRS] = await Promise.all([
+            // Fetch data dari ketiga sumber secara bersamaan
+            const [responseFaskes, responseRS, dataPascaRawatInap] = await Promise.all([
                 fetch(`${process.env.NEXT_PUBLIC_SIMRS}/antrol/api/onsitedebug?getrujukan=1&val=${nomorNik}`),
-                fetchRujukanRS(nomorNik)
+                fetchRujukanRS(nomorNik),
+                fetchRujukanPascaRawatInap(nomorNik)
             ]);
 
             const dataFaskes = await responseFaskes.json();
@@ -136,11 +150,13 @@ const Body = () => {
             // Cek apakah ada data rujukan dari salah satu sumber
             const hasFaskesData = dataFaskes.metaData.code === 200 && dataFaskes.response.rujukan && dataFaskes.response.rujukan.length > 0;
             const hasRSData = dataRS && dataRS.metaData.code === 200 && dataRS.response.rujukan && dataRS.response.rujukan.length > 0;
+            const hasPascaRawatInapData = dataPascaRawatInap && Array.isArray(dataPascaRawatInap) && dataPascaRawatInap.length > 0;
 
-            if (hasFaskesData || hasRSData) {
+            if (hasFaskesData || hasRSData || hasPascaRawatInapData) {
                 Swal.close();
                 const rujukanFaskes = hasFaskesData ? dataFaskes.response.rujukan : [];
                 const rujukanRS = hasRSData ? dataRS.response.rujukan : [];
+                const rujukanPascaRawatInap = hasPascaRawatInapData ? dataPascaRawatInap : [];
 
                 // Fungsi untuk membuat HTML tabel
                 const createTableHtml = (rujukanList, tabType) => `
@@ -174,6 +190,42 @@ const Body = () => {
                     </div>
                 `;
 
+                // Fungsi untuk membuat HTML tabel Pasca Rawat Inap
+                const createTableHtmlPascaRawatInap = (rujukanList) => `
+                    <div class="table-responsive" style="max-height: 400px; overflow-y: auto;">
+                        <table class="table table-hover table-bordered text-start">
+                            <thead class="table-light" style="position: sticky; top: 0;">
+                                <tr>
+                                    <th>No.</th>
+                                    <th>No. SEP</th>
+                                    <th>No. Rujukan</th>
+                                    <th>Tgl. SEP</th>
+                                    <th>Tgl. Rujukan</th>
+                                    <th>PPK Rujukan</th>
+                                    <th>Diagnosa</th>
+                                    <th>Aksi</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${rujukanList.map((rujukan, index) => `
+                                    <tr>
+                                        <td>${index + 1}</td>
+                                        <td>${rujukan.no_sep || '-'}</td>
+                                        <td>${rujukan.norujukan || rujukan.no_kartu || '-'}</td>
+                                        <td>${rujukan.tgl_sep ? rujukan.tgl_sep.split(' ')[0] : '-'}</td>
+                                        <td>${rujukan.tglrujukan || '-'}</td>
+                                        <td>${rujukan.ppkrujukan || '-'}</td>
+                                        <td>${rujukan.diagawal || '-'}</td>
+                                        <td>
+                                            <button class="btn btn-primary btn-sm btn-pilih-rujukan-pasca" data-index="${index}">Pilih</button>
+                                        </td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                `;
+
                 // Membuat HTML untuk modal dengan tab
                 const modalHtml = `
                     <div>
@@ -189,6 +241,11 @@ const Body = () => {
                                     Rujukan RS ${hasRSData ? `(${rujukanRS.length})` : '(0)'}
                                 </button>
                             </li>
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link ${!hasFaskesData && !hasRSData && hasPascaRawatInapData ? 'active' : ''}" id="pascari-tab" data-bs-toggle="tab" data-bs-target="#pascari" type="button" role="tab">
+                                    Pasca Rawat Inap ${hasPascaRawatInapData ? `(${rujukanPascaRawatInap.length})` : '(0)'}
+                                </button>
+                            </li>
                         </ul>
 
                         <!-- Tab Content -->
@@ -201,6 +258,11 @@ const Body = () => {
                             <!-- Tab RS -->
                             <div class="tab-pane fade ${!hasFaskesData && hasRSData ? 'show active' : ''}" id="rs" role="tabpanel">
                                 ${hasRSData ? createTableHtml(rujukanRS, 'rs') : '<p class="text-center text-muted py-3">Tidak ada data rujukan RS</p>'}
+                            </div>
+
+                            <!-- Tab Pasca Rawat Inap -->
+                            <div class="tab-pane fade ${!hasFaskesData && !hasRSData && hasPascaRawatInapData ? 'show active' : ''}" id="pascari" role="tabpanel">
+                                ${hasPascaRawatInapData ? createTableHtmlPascaRawatInap(rujukanPascaRawatInap) : '<p class="text-center text-muted py-3">Tidak ada data rujukan pasca rawat inap</p>'}
                             </div>
                         </div>
                     </div>
@@ -243,6 +305,17 @@ const Body = () => {
                                 const rujukanTerpilih = rujukanList.find(r => r.noKunjungan === noKunjungan);
                                 if (rujukanTerpilih) {
                                     handlePilihRujukan(rujukanTerpilih, tabType); // Kirim seluruh objek dan tipe tab
+                                }
+                            });
+                        });
+
+                        // Event listener untuk tombol pilih rujukan pasca rawat inap
+                        document.querySelectorAll('.btn-pilih-rujukan-pasca').forEach(button => {
+                            button.addEventListener('click', (e) => {
+                                const index = parseInt(e.currentTarget.getAttribute('data-index'));
+                                const rujukanTerpilih = rujukanPascaRawatInap[index];
+                                if (rujukanTerpilih) {
+                                    handlePilihRujukanPascaRawatInap(rujukanTerpilih);
                                 }
                             });
                         });
@@ -351,6 +424,63 @@ const Body = () => {
         }
     };
 
+    // --- FUNGSI BARU: Handler untuk memilih rujukan Pasca Rawat Inap ---
+    const handlePilihRujukanPascaRawatInap = async (rujukan: any) => {
+        console.log('Data rujukan pasca rawat inap yang dipilih:', rujukan);
+
+        // Simpan data rujukan
+        setSelectedRujukan(rujukan);
+        setSelectedRujukanType('pascari');
+        setNomorRujukan(rujukan.no_sep || ''); // Untuk pasca rawat inap, gunakan no_sep sebagai nomor rujukan
+
+        Swal.close(); // Tutup modal rujukan terlebih dahulu
+
+        // Cek apakah sudah ada surat kontrol
+        await checkSuratKontrol(rujukan.no_sep);
+    };
+
+    // Fungsi untuk mengecek surat kontrol
+    const checkSuratKontrol = async (noSep: string) => {
+        try {
+            Swal.fire({
+                title: 'Mengecek surat kontrol...',
+                didOpen: () => {
+                    Swal.showLoading();
+                },
+                allowOutsideClick: false
+            });
+
+            const response = await fetch(`${process.env.NEXT_PUBLIC_SIMRS}/antrol/api/cek_surat_kontrol_exist/${noSep}`);
+            const data = await response.json();
+
+            Swal.close();
+
+            if (data && data.surat_kontrol) {
+                // Surat kontrol sudah ada
+                setSuratKontrol(data.surat_kontrol);
+                setSelectedOption(''); // Reset pilihan poli
+                setIsDisablePoli(false); // Aktifkan pilihan poli agar user bisa memilih
+
+                Swal.fire('Sukses', `Rujukan Rawat Inap ${noSep} telah dipilih. Surat kontrol: ${data.surat_kontrol}`, 'success');
+            } else {
+                // Surat kontrol belum ada, tampilkan notifikasi untuk ke petugas
+                Swal.fire({
+                    icon: 'info',
+                    title: 'Surat Kontrol Belum Tersedia',
+                    html: `
+                        <p>Surat kontrol untuk rujukan pasca rawat inap dengan No. SEP <strong>${noSep}</strong> belum dibuat.</p>
+                        <p><strong>Silakan hubungi petugas loket untuk membuatkan surat kontrol terlebih dahulu.</strong></p>
+                    `,
+                    confirmButtonText: 'OK, Mengerti'
+                });
+            }
+        } catch (error) {
+            console.error('Error checking surat kontrol:', error);
+            Swal.fire('Error', 'Gagal mengecek surat kontrol.', 'error');
+        }
+    };
+
+
     // Ambil rujukan dan jumlah sep ( otomatiskan rujukan. )
     const fetchDataPasien = async (nomorkartu: string) => {
         const formData = new FormData();
@@ -450,6 +580,34 @@ const Body = () => {
 
         try {
             const response = await fetch(`${process.env.NEXT_PUBLIC_SIMRS}/antrol/api/onsitedebug?ceknokarturujukan=1&rs=1`, {
+                method: 'POST',
+                body: formData,  // Kirim body dalam bentuk form-data
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+
+            const data = await response.json(); // Jika respons berupa JSON
+            if (data.metaData.code == 200) {
+                return data.response;
+            } else {
+                throw new Error(`Peringatan : ${data.metaData.message}`);
+            }
+        } catch (error) {
+            console.error('Error:', error);
+        }
+    }
+
+    // --- FUNGSI BARU: Untuk fetch required data rujukan Pasca Rawat Inap ---
+    const fetchRequiredDataRujukanPascaRI = async (nomorKartu: string, kodePoli: string, rujukan: any) => {
+        const formData = new FormData();
+        formData.append('nomorkartu', nomorKartu); // Tambahkan data form
+        formData.append('kodepoli', kodePoli);
+        formData.append('rujukan', JSON.stringify(rujukan)); // Tambahkan nomor rujukan jika diperlukan
+
+        try {
+            const response = await fetch(`${process.env.NEXT_PUBLIC_SIMRS}/antrol/api/onsitedebug?ceknokarturujukan=1&pascari=1`, {
                 method: 'POST',
                 body: formData,  // Kirim body dalam bentuk form-data
             });
@@ -592,12 +750,15 @@ const Body = () => {
         if (selectedRujukanType === 'rs') {
             // Untuk rujukan RS, gunakan fungsi dengan parameter rs=1
             data = await fetchRequiredDataRujukanRS(nomorNik, selectedOption, selectedRujukan);
+        } else if (selectedRujukanType === 'pascari') {
+            // Untuk rujukan Pasca Rawat Inap, gunakan fungsi dengan parameter pascari=1
+            data = await fetchRequiredDataRujukanPascaRI(nomorNik, selectedOption, selectedRujukan);
+            data.nomorreferensi = suratKontrol;
+            data.jeniskunjungan = '4';
         } else {
             // Untuk rujukan Faskes, gunakan fungsi standar
             data = await fetchRequiredDataRujukan(nomorNik, selectedOption, selectedRujukan);
         }
-        console.log(data);
-        // return;
         if (data) {
             const formData = new FormData();
             formData.append('id_poli', selectedOption.split('#')[0]); // Ambil id poli dari selectedOption
@@ -610,9 +771,6 @@ const Body = () => {
             formData.append('jampraktek', selectedDokter.split('@')[1]);
             formData.append('jeniskunjungan', data.jeniskunjungan);
             formData.append('nomorreferensi', data.nomorreferensi);
-
-            // console.log(formData);
-            // return;
             // try {
             const response = await fetch(`${process.env.NEXT_PUBLIC_SIMRS}/antrol/api/onsitedebug?submitdebug=1`, {
                 method: 'POST',
